@@ -28,13 +28,15 @@ Measure SeparatorはMuseScore標準の水平フレームを使い、指定した
 3. **ホーム → プラグイン** でMeasure Separatorを有効にします。
 4. 楽譜を開き、**プラグイン → Measure Separator** から **適用** を押します。元に戻すには **分割解除** を使います。
 
+**1か所だけ区切る場合**は、譜面上で小節を1つ選択し、［適用範囲］で［選択した1小節の直前］または［選択した1小節の直後］を選んで［適用］を押します。指定した位置に空白を追加し、すでにMeasure Separatorで空白を入れている場合はその幅を更新します。ほかの余白は維持されます。
+
 詳細は[インストール手順](INSTALL.md)と[動作検証結果](TEST_RESULTS.md)をご覧ください。リンク済みパートを含むスコアは、対象パートを独立した譜面として開いてください。改行・改ページの境界や、複数小節をまとめた反復記号の途中などでは分割を省略します。
 
 [Before / Afterの比較](Examples/BeforeAfter.png) · [変更履歴](CHANGELOG.md) · [GPL-3.0-only](LICENSE)
 
 ## English
 
-Measure Separator is a MuseScore Studio plugin that adds adjustable gaps between measures for sight-reading practice. It uses native horizontal frames and lets you apply or remove the spacing without adding notes or rests. The default is 3.0 staff spaces between consecutive measures.
+Measure Separator is a MuseScore Studio plugin that adds adjustable gaps between measures for sight-reading practice. It uses native horizontal frames and lets you apply or remove the spacing without adding notes or rests. The default is 3.0 staff spaces between consecutive measures. To place a single gap, select one measure and use the Before or After option in Scope.
 
 The design draws on research on visual grouping in notation. Those studies placed gaps at musical groups, while this plugin uses a configurable measure interval. Its effect on sight-reading accuracy or cognitive load has yet to be evaluated. The score above shows Measure Separator alongside the separate Accidental Color plugin.
 

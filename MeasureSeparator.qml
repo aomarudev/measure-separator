@@ -10,7 +10,7 @@ MuseScore {
     id: root
     title: "Measure Separator"
     description: "Separates measures with native horizontal frames."
-    version: "0.1.4"
+    version: "0.1.5"
     thumbnailName: "MeasureSeparator.png"
     pluginType: "action"
     requiresScore: true
@@ -352,6 +352,8 @@ MuseScore {
             throw new Error(ui("リンクされたパート譜があるスコアには、独立した譜面ファイルをご使用ください。",
                                "Use a standalone score file when the project has linked parts."))
         const saved = captureSelection(score)
+        if (!removing && options.boundary)
+            return editSelectedBoundary(score, measures, saved, options.boundary, options.width)
         const range = rangeOf(measures, !removing && options.selected, saved)
         const ids = measureIds(measures)
         const initial = framesOf(score)
@@ -446,6 +448,58 @@ MuseScore {
         return { frames: framesOf(score).length, skipped: skipped, edges: edges, restored: restored, rejected: rejected }
     }
 
+    function editSelectedBoundary(score, measures, saved, side, widthSp) {
+        if (saved.first === undefined)
+            throw new Error(ui("楽譜上で小節を1つ選択してください。", "Select exactly one measure in the score."))
+        const selection = rangeOf(measures, true, saved)
+        if (selection.end - selection.first !== 1)
+            throw new Error(ui("楽譜上で小節を1つ選択してください。", "Select exactly one measure in the score."))
+
+        const index = side === "before" ? selection.first : selection.end
+        if (index === 0 || index === measures.length)
+            throw new Error(ui("楽譜の先頭・末尾には小節間の余白を追加できません。",
+                               "A gap can only be added between two measures."))
+        const left = measures[index - 1]
+        const right = measures[index]
+        const tick = right.tick.ticks
+        if (hasBreak(left) || repeatGroupBoundaries(measures, score.ntracks).has(index)
+                || !same(visibleMeasures(score).get(tick), right))
+            throw new Error(ui("この位置は改行・改ページ、反復グループ、または多小節休符と重なっています。",
+                               "This boundary conflicts with a break, repeat group, or multimeasure rest."))
+
+        const previous = right.prev
+        const owned = ownership(previous)
+        if (!owned && !same(left, previous))
+            throw new Error(ui("この位置には別のフレームがあります。", "This boundary already contains another frame."))
+        const anchor = owned ? null : chordRestAnchor(right, score.ntracks)
+        if (!owned && !anchor)
+            throw new Error(ui("この位置で挿入に使える音符・休符がありません。",
+                               "There is no note or rest available at this boundary."))
+
+        score.startCmd("Measure Separator: Edit one boundary")
+        try {
+            if (owned) {
+                setFrame(owned.frame, widthSp)
+                if (owned.marker.text.startsWith(legacyMarkerPrefix))
+                    owned.marker.text = encodeState(owned.state)
+            } else if (!insertFrame(score, right, anchor, widthSp, measureBaseCount(score))) {
+                throw new Error(ui("MuseScoreがこの位置への挿入を受け付けませんでした。",
+                                   "MuseScore refused an insertion at this boundary."))
+            }
+            layout(score)
+            if (trimSystemEdges(score, tick - 1, tick + 1))
+                throw new Error(ui("この位置は行の先頭または末尾になるため、余白を追加できません。",
+                                   "The gap would sit at a system edge, where the measures are already separated."))
+        } catch (error) {
+            score.endCmd(true)
+            restoreSelection(score, saved)
+            throw error
+        }
+        score.endCmd()
+        restoreSelection(score, saved)
+        return { boundaryChanged: true }
+    }
+
     Loader {
         id: panelLoader
         active: false
@@ -499,9 +553,16 @@ MuseScore {
                         }
                         const result = root.editScore(current, {
                             selected: scope.currentIndex === 1, interval: interval.value, width: gap.value / 2,
-                            hideBars: barlines.currentIndex === 1, numberMode: numbers.currentIndex
+                            hideBars: barlines.currentIndex === 1, numberMode: numbers.currentIndex,
+                            boundary: scope.currentIndex === 2 ? "before" : scope.currentIndex === 3 ? "after" : ""
                         }, removing)
                         savePreferences()
+                        if (result.boundaryChanged) {
+                            status = root.ui("選択した小節の%1に余白を設定しました。",
+                                             "Set the gap %1 the selected measure.")
+                                .arg(scope.currentIndex === 2 ? root.ui("直前", "before") : root.ui("直後", "after"))
+                            return
+                        }
                         status = removing
                             ? root.ui("分割を解除しました。復元した表示設定 ", "Separators removed. Display settings restored ") + result.restored
                             : root.ui("追加フレームの合計 ", "Total separator frames ") + result.frames
@@ -542,11 +603,14 @@ MuseScore {
                         ComboBox {
                             id: scope
                             Layout.fillWidth: true
-                            model: [root.ui("楽譜全体", "Whole score"), root.ui("選択した小節範囲", "Selected measures")]
+                            model: [root.ui("楽譜全体", "Whole score"),
+                                    root.ui("選択した小節範囲", "Selected measures"),
+                                    root.ui("選択した1小節の直前", "Before the selected measure"),
+                                    root.ui("選択した1小節の直後", "After the selected measure")]
                         }
 
                         Label { text: root.ui("分割間隔（小節）", "Group size (measures)") }
-                        SpinBox { id: interval; from: 1; to: 9999; value: 1; editable: true }
+                        SpinBox { id: interval; from: 1; to: 9999; value: 1; editable: true; enabled: scope.currentIndex < 2 }
 
                         Label { text: root.ui("余白幅（sp）", "Gap width (sp)") }
                         RowLayout {
@@ -574,6 +638,7 @@ MuseScore {
                         ComboBox {
                             id: barlines
                             Layout.fillWidth: true
+                            enabled: scope.currentIndex < 2
                             model: [root.ui("元の表示設定に従う", "Use original visibility"),
                                     root.ui("非表示", "Hide")]
                         }
@@ -582,6 +647,7 @@ MuseScore {
                         ComboBox {
                             id: numbers
                             Layout.fillWidth: true
+                            enabled: scope.currentIndex < 2
                             model: [root.ui("楽譜の表示設定に従う", "Use score settings"),
                                     root.ui("すべての小節に表示", "Show all"), root.ui("非表示", "Hide")]
                         }
@@ -593,10 +659,12 @@ MuseScore {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 70
                         readonly property int groupSize: interval.value
+                        readonly property int singleGap: scope.currentIndex >= 2 ? scope.currentIndex : 0
                         readonly property int spaceSteps: gap.value
-                        readonly property bool showBars: barlines.currentIndex === 0
-                        readonly property int numberMode: numbers.currentIndex
+                        readonly property bool showBars: singleGap > 0 || barlines.currentIndex === 0
+                        readonly property int numberMode: singleGap > 0 ? 0 : numbers.currentIndex
                         onGroupSizeChanged: requestPaint()
+                        onSingleGapChanged: requestPaint()
                         onSpaceStepsChanged: requestPaint()
                         onShowBarsChanged: requestPaint()
                         onNumberModeChanged: requestPaint()
@@ -608,10 +676,14 @@ MuseScore {
                             context.fillRect(0, 0, width, height)
                             const count = 6
                             const empty = 2.5 * spaceSteps
-                            const groupGaps = Math.floor((count - 1) / groupSize)
+                            const groupGaps = singleGap ? 1 : Math.floor((count - 1) / groupSize)
                             const measureWidth = (width - 32 - groupGaps * empty) / count
                             let x = 16
                             for (let index = 0; index < count; ++index) {
+                                if (singleGap && index === 2) {
+                                    context.fillStyle = "#dceaf9"
+                                    context.fillRect(x, 18, measureWidth, 32)
+                                }
                                 context.strokeStyle = "#465260"
                                 context.beginPath()
                                 for (let line = 0; line < 5; ++line) {
@@ -629,7 +701,8 @@ MuseScore {
                                 context.fill()
                                 if (numberMode === 1 || (numberMode === 0 && index === 0))
                                     context.fillText(String(index + 1), x + 3, 16)
-                                x += measureWidth + ((index + 1) % groupSize === 0 ? empty : 0)
+                                const gapAfter = singleGap ? index + 1 === singleGap : (index + 1) % groupSize === 0
+                                x += measureWidth + (gapAfter ? empty : 0)
                             }
                         }
                     }
