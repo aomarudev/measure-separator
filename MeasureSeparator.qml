@@ -10,7 +10,7 @@ MuseScore {
     id: root
     title: "Measure Separator"
     description: "Separates measures with native horizontal frames."
-    version: "0.1.5"
+    version: "0.1.6"
     thumbnailName: "MeasureSeparator.png"
     pluginType: "action"
     requiresScore: true
@@ -507,19 +507,28 @@ MuseScore {
             Window {
                 id: panel
                 title: root.title + " " + root.version
-                width: 650
-                height: 510
-                minimumWidth: 520
-                minimumHeight: 450
-                flags: Qt.Dialog | Qt.WindowCloseButtonHint
+                width: 490
+                height: 405
+                minimumWidth: 460
+                minimumHeight: 385
+                // Keep the controls accessible when the user clicks the score behind them.
+                flags: Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint
                 modality: Qt.NonModal
                 color: panelPalette.window
                 property var openedScore: null
                 property string status: ""
                 property bool busy: false
+                property string selectionKey: ""
+                property string selectionText: ""
 
                 SystemPalette { id: panelPalette }
                 Settings { id: preferences; category: "MeasureSeparator" }
+                Timer {
+                    interval: 200
+                    repeat: true
+                    running: panel.visible && !panel.busy
+                    onTriggered: panel.refreshSelection()
+                }
 
                 onClosing: Qt.callLater(function() { panelLoader.active = false })
 
@@ -531,8 +540,40 @@ MuseScore {
                     let mode = Number(preferences.value("numbers", 0))
                     numbers.currentIndex = mode === 1 || mode === 2 ? mode : 0
                     scope.currentIndex = score && score.selection.isRange ? 1 : 0
+                    selectionKey = ""
+                    refreshSelection()
                     show()
                     requestActivate()
+                }
+
+                function refreshSelection() {
+                    const score = root.curScore
+                    if (!root.same(score, openedScore)) {
+                        selectionKey = ""
+                        selectionText = root.ui("プラグインを開いたときの楽譜に戻ってください。",
+                                                "Return to the score that was open when you started the plugin.")
+                        return
+                    }
+                    if (!score.selection.isRange) {
+                        selectionKey = ""
+                        selectionText = root.ui("楽譜の小節内の空白をクリックして選択できます。",
+                                                "Click an empty area inside a measure to select it.")
+                        return
+                    }
+                    const saved = root.captureSelection(score)
+                    const key = saved.first + ":" + saved.end + ":" + score.nmeasures
+                    if (selectionKey === key)
+                        return
+                    selectionKey = key
+                    try {
+                        const range = root.rangeOf(root.measuresOf(score), true, saved)
+                        selectionText = range.end === range.first + 1
+                            ? root.ui("選択中：先頭から %1 番目の小節", "Selected measure position: %1").arg(range.end)
+                            : root.ui("選択中：先頭から %1～%2 番目の小節", "Selected measure positions: %1–%2")
+                                .arg(range.first + 1).arg(range.end)
+                    } catch (error) {
+                        selectionText = error.message || String(error)
+                    }
                 }
 
                 function savePreferences() {
@@ -575,15 +616,22 @@ MuseScore {
                         status = error.message || String(error)
                     } finally {
                         busy = false
+                        refreshSelection()
                     }
                 }
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 22
-                    spacing: 10
+                    anchors.margins: 16
+                    spacing: 8
 
                     Label { text: "Measure Separator"; font.pixelSize: 24; font.bold: true }
+
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: panel.selectionText
+                    }
 
                     Label {
                         Layout.fillWidth: true
@@ -657,7 +705,7 @@ MuseScore {
                     Canvas {
                         id: preview
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 70
+                        Layout.preferredHeight: 60
                         readonly property int groupSize: interval.value
                         readonly property int singleGap: scope.currentIndex >= 2 ? scope.currentIndex : 0
                         readonly property int spaceSteps: gap.value
